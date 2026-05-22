@@ -1,0 +1,81 @@
+Employee_ID,First_Name,Last_Name,Birth_Date,Gender,Hire_Date,Job_Title,Department_Name,Location_Name,Annual_Salary,Email,Manager_ID,Pay_Type
+ACM10000,David,Davis,01-01-1970,Male,2012-03-15,Chief Medical Officer,Administration,Searcy HQ,245000,ddavis@acmehealth.org,,Salary
+ACM10001,Emma,Brown,01/02/1975,Female,01/02/2014,Family Physician,Primary Care,Augusta,205000,ebrown@acmehealth.org,ACM10000,Salary
+ACM10002,Maria,Martinez,03-01-1972,,2015-03-03,Nurse Practitioner,Primary Care,Batesville,108000,mmartinez@acmehealth.org,ACM10001,Salary
+ACM10003,Michael,Williams,1970-04-01,M,invalid,Pharmacist,Pharmacy,Searcy,132000,mwilliams@acmehealth.org,ACM10000,Salary
+ACM10004,Sarah,Jones,05/05/1980,Female,05/05/2015,Registered Nurse,Primary Care,Heber Springs,72000,,ACM10001,Hourly
+ACM10005,James,Garcia,06-15-1982,Male,,LPN,Primary Care,Mountain View,48000,jgarcia@acmehealth.org,ACM10002,Hourly
+ACM10006,Olivia,Miller,1985/07/20,F,2016-06-06,Medical Assistant,Primary Care,Newport,invalid,omiller@acmehealth.org,,Hourly
+ACM10007,William,Rodriguez,,Male,2017-08-08,Dentist,Dental,Cabot,178000,wrodriguez@acmehealth.org,ACM10000,Salary
+ACM10008,Ava,Wilson,09-25-1990,Female,2018-09-09,Behavioral Health Counselor,Behavioral Health,Remote,68000,,ACM10000,Salary
+ACM10009,Robert,Taylor,12/31/1965,M,invalid-date,Practice Manager,Administration,Beebe,84000,rtaylor@acmehealth.org,ACM10000,Salary
+ACM10010,Linda,Anderson,02-14-1978,Female,2013-07-22,Family Physician,Primary Care,Clinton,198000,landerson@acmehealth.org,ACM10000,Salary
+ACM10011,John,Thomas,11/30/1969,Male,2011-11-30,Pharmacist,Pharmacy,Augusta,138000,jthomas@acmehealth.org,ACM10000,Salary
+ACM10012,Jessica,Jackson,1988-06-12,Female,2019-01-15,Registered Nurse,Primary Care,Batesville,68000,jjackson@acmehealth.org,ACM10001,Hourly
+ACM10013,Christopher,Martin,03/22/1983,M,03/22/2016,RN,Primary Care,Searcy,71000,,ACM10001,Hourly
+ACM10014,Amanda,Lee,1991/10/05,F,2020-02-10,Medical Assistant,Primary Care,Corning,34000,alee@acmehealth.org,ACM10006,Hourly
+ACM10015,Daniel,Perez,07-04-1977,Male,2014-04-04,Dental Hygienist,Dental,Cabot,68000,dperez@acmehealth.org,ACM10007,Hourly
+ACM10016,Ashley,Thompson,,Female,2018-11-11,Billing Specialist,Billing,Searcy,42000,athompson@acmehealth.org,ACM10009,Hourly
+ACM10017,Matthew,White,08/19/1986,Male,invalid,IT Support,IT,Searcy HQ,58000,mwhite@acmehealth.org,,Salary
+ACM10018,Jennifer,Harris,1973-12-08,Female,2010-05-20,Nurse Practitioner,Primary Care,Newport,112000,jharris@acmehealth.org,ACM10001,Salary
+ACM10019,Joshua,Sanchez,04-04-1989,Male,2019-08-19,Pharmacy Technician,Pharmacy,Augusta,38000,jsanchez@acmehealth.org,ACM10011,Hourly
+ACM10020,Megan,Clark,06/30/1992,F,2021-03-01,LPN,Primary Care,Heber Springs,invalid,mclark@acmehealth.org,ACM10004,Hourly
+ACM10021,Andrew,Ramirez,1981-09-17,M,2015-09-17,Family Physician,Primary Care,Mountain View,201000,aramirez@acmehealth.org,ACM10000,Salary
+ACM10022,Lauren,Lewis,10-11-1987,Female,2017-06-15,Behavioral Health Counselor,Behavioral Health,Searcy,66000,,ACM10000,Salary
+ACM10023,Kevin,Robinson,,Male,2013-02-14,Operations Manager,Operations,Searcy HQ,92000,krobinson@acmehealth.org,ACM10000,Salary
+ACM10024,Brittany,Walker,02/29/1988,Female,02/29/2020,Medical Assistant,,Beebe,32000,bwalker@acmehealth.org,ACM10006,Hourly
+ACM10025,Brian,Young,1976/05/14,Male,2012-08-08,Dentist,Dental,Searcy,182000,byoung@acmehealth.org,ACM10000,Salary
+ACM10026,Stephanie,Allen,12-12-1990,F,invalid,Front Desk,Administration,Augusta,30000,sallen@acmehealth.org,ACM10024,Hourly
+ACM10027,Eric,King,1979-08-23,M,2014-10-10,Pharmacist,Pharmacy,Clinton,128000,eking@acmehealth.org,ACM10011,Salary
+ACM10028,Nicole,Wright,01-30-1985,Female,2016-12-01,Registered Nurse,Primary Care,Corning,69000,,ACM10001,Hourly
+ACM10029,Joseph,Scott,03/03/1968,Male,2009-04-15,Family Physician,Primary Care,Cabot,212000,jscott@acmehealth.org,ACM10000,Salary
+ACM10030,Rachel,Torres,1993-11-22,Female,2022-01-10,Medical Assistant,Primary Care,Augusta,33500,rtorres@acmehealth.org,ACM10006,Hourly
+ACM10031,Anthony,Nguyen,,M,2018-05-05,IT Support,IT,Remote,55000,anguyen@acmehealth.org,ACM10017,Salary
+ACM10032,Heather,Hill,07/15/1982,Female,07/15/2015,Billing Specialist,Billing,Searcy,44000,hhill@acmehealth.org,ACM10009,Hourly
+ACM10033,Ryan,Flores,1984/02/19,Male,2019-11-11,LPN,Primary Care,Newport,47000,,ACM10004,Hourly
+ACM10034,Samantha,Green,09-09-1991,F,2020-06-22,Patient Coordinator,Administration,Batesville,36000,sgreen@acmehealth.org,ACM10009,Hourly
+ACM10035,Justin,Adams,1980-04-27,Male,2014-07-30,Nurse Practitioner,Primary Care,Heber Springs,110000,jadams@acmehealth.org,ACM10001,Salary
+ACM10036,Crystal,Nelson,11/11/1986,Female,invalid-date,Behavioral Health Counselor,Behavioral Health,Mountain View,64000,cnelson@acmehealth.org,,Salary
+ACM10037,Brandon,Baker,06-08-1979,M,2011-06-08,Pharmacist,Pharmacy,Batesville,invalid,bbaker@acmehealth.org,ACM10011,Salary
+ACM10038,Tiffany,Hall,1987/12/03,Female,2018-03-19,Dental Hygienist,Dental,Augusta,66000,thall@acmehealth.org,ACM10007,Hourly
+ACM10039,Jose,Rivera,02-20-1972,Male,2010-09-01,Family Physician,Primary Care,Clinton,208000,jrivera@acmehealth.org,ACM10000,Salary
+ACM10040,Sandra,Campbell,,Female,2015-05-05,RN,Primary Care,Beebe,70000,,ACM10001,Hourly
+ACM10041,Carlos,Mitchell,08/08/1975,M,2008-08-08,Director of Pharmacy,Pharmacy,Searcy HQ,165000,cmitchell@acmehealth.org,ACM10000,Salary
+ACM10042,Donna,Carter,1969-10-19,F,2007-02-14,HR Specialist,HR,Searcy,52000,dcarter@acmehealth.org,ACM10000,Salary
+ACM10043,Kenneth,Roberts,04/14/1981,Male,invalid,Finance Analyst,Finance,Searcy HQ,72000,kroberts@acmehealth.org,ACM10000,Salary
+ACM10044,Carol,Phillips,12-25-1974,Female,2013-12-25,Practice Manager,Administration,Newport,86000,cphillips@acmehealth.org,ACM10000,Salary
+ACM10045,Charles,Evans,1983-06-30,M,2017-10-10,Pharmacy Technician,Pharmacy,Cabot,39000,,ACM10011,Hourly
+ACM10046,Susan,Turner,05/05/1971,Female,2009-05-05,Family Physician,Primary Care,Searcy,225000,sturner@acmehealth.org,ACM10000,Salary
+ACM10047,Thomas,Diaz,,Male,2016-04-04,Dentist,Dental,Batesville,175000,tdiaz@acmehealth.org,ACM10000,Salary
+ACM10048,Patricia,Parker,1989-01-25,F,2021-07-07,LPN,Primary Care,Corning,46000,pparker@acmehealth.org,ACM10004,Hourly
+ACM10049,Mark,Cruz,10/10/1985,M,10/10/2018,Medical Coder,Billing,Remote,48000,mcruz@acmehealth.org,ACM10009,Salary
+ACM10050,Karen,Edwards,1977/03/12,Female,2012-11-11,Registered Nurse,Primary Care,Heber Springs,74000,kedwards@acmehealth.org,ACM10001,Hourly
+ACM10051,Steven,Collins,06-22-1968,Male,2006-06-22,Family Physician,Primary Care,Mountain View,232000,scollins@acmehealth.org,ACM10000,Salary
+ACM10052,Lisa,Stewart,,Female,invalid,Behavioral Health Counselor,Behavioral Health,Newport,65000,,ACM10000,Salary
+ACM10053,Paul,Sanchez,11/04/1990,M,2020-09-15,Medical Assistant,Primary Care,Augusta,invalid,psanchez@acmehealth.org,ACM10006,Hourly
+ACM10054,Nancy,Morris,1973-08-08,Female,2008-08-08,Nurse Practitioner,Primary Care,Clinton,115000,nmorris@acmehealth.org,ACM10001,Salary
+ACM10055,Mark,Rogers,02-02-1980,Male,2015-02-02,Pharmacist,Pharmacy,Searcy,141000,mrogers@acmehealth.org,ACM10041,Salary
+ACM10056,Betty,Reed,1992/05/30,F,2022-08-15,Front Desk,Administration,Batesville,29500,breed@acmehealth.org,ACM10024,Hourly
+ACM10057,Donald,Cook,07-07-1965,M,2004-07-07,Family Physician,Primary Care,Searcy,255000,dcook@acmehealth.org,,Salary
+ACM10058,Sharon,Morgan,1986-12-15,Female,2017-03-20,Dental Hygienist,Dental,Heber Springs,67000,,ACM10007,Hourly
+ACM10059,Edward,Bell,09/27/1988,Male,2019-05-12,IT Support,IT,Searcy HQ,57000,ebell@acmehealth.org,ACM10017,Salary
+ACM10060,Kimberly,Murphy,,Female,2014-09-09,RN,Primary Care,Cabot,73000,kmurphy@acmehealth.org,ACM10001,Hourly
+ACM10061,Frank,Bailey,04-04-1976,M,invalid,Operations Manager,Operations,Beebe,91000,fbailey@acmehealth.org,ACM10023,Salary
+ACM10062,Deborah,Rivera,1970/01/01,F,2005-01-01,HR Specialist,HR,Searcy HQ,54000,drivera@acmehealth.org,ACM10000,Salary
+ACM10063,Gregory,Cooper,06/14/1984,Male,2018-12-12,Pharmacy Technician,Pharmacy,Newport,37000,,ACM10027,Hourly
+ACM10064,Cynthia,Howard,12-08-1989,Female,2020-04-04,Medical Assistant,,Mountain View,33000,choward@acmehealth.org,ACM10006,Hourly
+ACM10065,Larry,Ward,1971-07-19,M,2009-09-09,Family Physician,Primary Care,Augusta,218000,lward@acmehealth.org,ACM10000,Salary
+ACM10066,Angela,Cox,08/30/1985,Female,2016-08-30,Behavioral Health Counselor,Behavioral Health,Clinton,67000,acox@acmehealth.org,ACM10000,Salary
+ACM10067,Jerry,Richardson,1979/11/11,Male,invalid-date,Billing Specialist,Billing,Searcy,43500,jrichardson@acmehealth.org,ACM10009,Hourly
+ACM10068,Michelle,Brooks,,Female,2013-06-06,LPN,Primary Care,Corning,49000,,ACM10004,Hourly
+ACM10069,Scott,Wood,05-19-1982,M,2015-10-10,Dentist,Dental,Searcy,168000,swood@acmehealth.org,ACM10000,Salary
+ACM10070,Laura,Foster,1990-02-28,F,2021-11-01,Registered Nurse,Primary Care,Beebe,68500,lfoster@acmehealth.org,ACM10001,Hourly
+ACM10071,Jonathan,Gray,03/03/1978,Male,2011-03-03,Finance Analyst,Finance,Searcy HQ,75000,jgray@acmehealth.org,ACM10043,Salary
+ACM10072,Helen,Bennett,1968/04/22,Female,invalid,Director of Nursing,Primary Care,Searcy HQ,142000,hbennett@acmehealth.org,ACM10000,Salary
+ACM10073,Raymond,Long,10-10-1973,M,2010-10-10,Pharmacist,Pharmacy,Heber Springs,135000,,ACM10041,Salary
+ACM10074,Diane,Hughes,07/14/1986,Female,2019-07-14,Patient Coordinator,Administration,Mountain View,35000,dhughes@acmehealth.org,ACM10044,Hourly
+ACM10075,David,Davis,01-01-1970,Male,2012-03-15,Chief Medical Officer,Administration,Searcy HQ,245000,ddavis@acmehealth.org,,Salary
+ACM10076,Emma,Brown,01/02/1975,Female,01/02/2014,Family Physician,Primary Care,Augusta,205000,ebrown@acmehealth.org,ACM10000,Salary
+ACM10077,Maria,Martinez,03-01-1972,,2015-03-03,Nurse Practitioner,Primary Care,Batesville,108000,mmartinez@acmehealth.org,ACM10001,Salary
+ACM10078,Michael,Williams,1970-04-01,M,invalid,Pharmacist,Pharmacy,Searcy,132000,mwilliams@acmehealth.org,ACM10000,Salary
+ACM10079,Sarah,Jones,05/05/1980,Female,05/05/2015,Registered Nurse,Primary Care,Heber Springs,72000,,ACM10001,Hourly

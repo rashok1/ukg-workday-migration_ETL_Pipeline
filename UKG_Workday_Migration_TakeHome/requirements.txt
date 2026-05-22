@@ -1,0 +1,6 @@
+pandas
+streamlit
+plotly
+sqlalchemy
+langchain
+langchain-ollama
