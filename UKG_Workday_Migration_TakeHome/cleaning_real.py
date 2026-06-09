@@ -1,293 +1,201 @@
-import pandas as pd
-import numpy as np
+"""
+cleaning_real.py
+----------------
+Stage 2: deterministic cleaning functions only.
+
+Rules:
+  - This file contains ONLY function definitions.
+  - No top-level execution. Importing this file does nothing.
+  - etl_pipeline.py calls run_cleaning() explicitly.
+
+Every field here is owner=RULE per the field-mapping doc.
+The LLM never runs here.
+"""
+
 import re
-
-from dateutil import parser
+import numpy as np
+import pandas as pd
+from dateutil import parser as dateutil_parser
 from datetime import datetime
-from sqlalchemy import create_engine
 
-# =========================
-# LOAD CSV
-# =========================
 
-df = pd.read_csv("ukg_employees_raw.csv")
+# =========================================================
+# INDIVIDUAL CLEANING FUNCTIONS
+# Each is independently testable and importable.
+# =========================================================
 
-# =========================
-# COPY RAW DATA
-# =========================
-
-raw_df = df.copy()
-
-# =========================
-# CLEANING FUNCTIONS
-# =========================
-
-def clean_name(name):
-
-    if pd.isnull(name):
+def clean_name(value) -> str | None:
+    """Trim, title-case, strip non-ASCII control characters."""
+    if pd.isnull(value):
         return None
-
-    return (
-        str(name)
-        .strip()
-        .title()
-    )
+    return re.sub(r'[^\x20-\x7E]', '', str(value)).strip().title()
 
 
-def clean_email(email):
-
-    if pd.isnull(email):
+def clean_email(value) -> str | None:
+    """Lowercase and strip whitespace."""
+    if pd.isnull(value):
         return None
-
-    return (
-        str(email)
-        .strip()
-        .lower()
-    )
+    return str(value).strip().lower()
 
 
-def validate_email(email):
-
-    if pd.isnull(email):
+def validate_email(value) -> bool:
+    """Returns True if value matches basic email pattern."""
+    if not value:
         return False
-
-    pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
-
-    return bool(re.match(pattern, email))
+    return bool(re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', str(value)))
 
 
-def parse_date(date_value):
-
-    if pd.isnull(date_value):
+def parse_date(value):
+    """
+    Parses mixed UKG date formats: MM-DD-YYYY, MM/DD/YYYY,
+    YYYY-MM-DD, YYYY/MM/DD, and literal "invalid".
+    Returns a Python date or None -- never NaT -- so SQLite stores NULL.
+    """
+    if pd.isnull(value):
         return None
-
     try:
-        return parser.parse(
-            str(date_value)
-        ).date()
-
-    except:
+        return dateutil_parser.parse(str(value)).date()
+    except Exception:
         return None
 
 
-def clean_salary(value):
-
+def clean_salary(value) -> float:
+    """
+    Strips "$" and "," then coerces to float.
+    Anything non-numeric -> NaN.
+    """
     if pd.isnull(value):
         return np.nan
-
-    value = str(value).strip().lower()
-
-    value = value.replace("$", "")
-    value = value.replace(",", "")
-
+    cleaned = re.sub(r'[$,]', '', str(value).strip())
     try:
-        return float(value)
-
-    except:
+        return float(cleaned)
+    except ValueError:
         return np.nan
 
 
-# =========================
-# CLEAN NAMES
-# =========================
+def strip_location_suffix(value) -> str:
+    """
+    Strips trailing 'HQ' or 'Office' from location strings.
+    fillna("") before regex so nulls never break str methods on
+    larger datasets.
+    """
+    if pd.isnull(value):
+        return "Remote"
+    return re.sub(r'\s*(HQ|Office)\b', '', str(value), flags=re.IGNORECASE).strip()
 
-df["First_Name"] = df["First_Name"].apply(clean_name)
 
-df["Last_Name"] = df["Last_Name"].apply(clean_name)
-
-# =========================
-# CLEAN EMAILS
-# =========================
-
-df["Email"] = df["Email"].apply(clean_email)
-
-df["email_valid"] = df["Email"].apply(validate_email)
-
-# =========================
-# CLEAN DATES
-# =========================
-
-df["Birth_Date"] = df["Birth_Date"].apply(parse_date)
-
-df["Hire_Date"] = df["Hire_Date"].apply(parse_date)
-
-# =========================
-# CLEAN GENDER
-# =========================
-
-gender_map = {
-    "M": "Male",
-    "F": "Female",
-    "Male": "Male",
-    "Female": "Female"
-}
-
-df["Gender"] = (
-    df["Gender"]
-    .map(gender_map)
-    .fillna("Not Specified")
-)
-
-# =========================
-# CLEAN LOCATIONS
-# =========================
-
-df["Location_Name"] = (
-    df["Location_Name"]
-    .str.replace(
-        r"HQ|Office",
-        "",
-        regex=True
-    )
-    .str.strip()
-)
-
-# =========================
-# CLEAN DEPARTMENT
-# =========================
-
-df["Department_Name"] = (
-    df["Department_Name"]
-    .fillna("Unknown")
-    .str.strip()
-)
-
-# =========================
-# CLEAN SALARY
-# =========================
-
-df["Annual_Salary"] = (
-    df["Annual_Salary"]
-    .apply(clean_salary)
-)
-
-# =========================
-# REMOVE DUPLICATES
-# =========================
-
-before_count = len(df)
-
-df = df.drop_duplicates(
-    subset=[
-        "First_Name",
-        "Last_Name",
-        "Birth_Date"
-    ]
-)
-
-after_count = len(df)
-
-duplicates_removed = before_count - after_count
-
-# =========================
-# VALIDATION FLAGS
-# =========================
-
-df["salary_valid"] = (
-    df["Annual_Salary"]
-    .notnull()
-)
-
-df["birth_date_valid"] = (
-    df["Birth_Date"]
-    .notnull()
-)
-
-# =========================
-# BUILD EXCEPTION REASONS
-# =========================
-
-exception_conditions = []
-
-for index, row in df.iterrows():
-
+def build_exception_reason(row) -> str:
+    """
+    Returns a semicolon-separated string of validation failures
+    for a single row. Empty string means the row is clean.
+    Categories match the field-mapping doc exception table.
+    """
     reasons = []
-
     if not row["salary_valid"]:
-        reasons.append("Invalid salary")
-
+        reasons.append("invalid salary")
     if not row["birth_date_valid"]:
-        reasons.append("Invalid or missing birth date")
-
+        reasons.append("invalid/missing birth date")
+    if not row["hire_date_valid"]:
+        reasons.append("invalid/missing hire date")
     if pd.notnull(row["Email"]) and not row["email_valid"]:
-        reasons.append("Invalid email")
+        reasons.append("invalid email format")
+    if row["Department_Name"] == "Unknown":
+        reasons.append("missing department -- LLM retry or HUMAN")
+    return "; ".join(reasons)
 
-    exception_conditions.append(
-        "; ".join(reasons)
+
+# =========================================================
+# MAIN ENTRY POINT
+# Called by etl_pipeline.py -- never runs on import.
+# =========================================================
+
+def run_cleaning(csv_path: str):
+    """
+    Loads the UKG CSV, applies all deterministic RULE transformations,
+    deduplicates, splits clean vs exception rows, adds audit columns.
+
+    Parameters
+    ----------
+    csv_path : str
+        Path to the raw UKG employee CSV export.
+
+    Returns
+    -------
+    clean_df      : pd.DataFrame  -- rows ready for Stage 4 LLM mapping
+    exceptions_df : pd.DataFrame  -- rows that failed validation
+    dupes_df      : pd.DataFrame  -- duplicate rows (logged, not loaded)
+    stats         : dict          -- row counts for pipeline summary
+    """
+    df = pd.read_csv(csv_path)
+    raw_count = len(df)
+
+    # --- Names (RULE) ---
+    df["First_Name"] = df["First_Name"].apply(clean_name)
+    df["Last_Name"]  = df["Last_Name"].apply(clean_name)
+
+    # --- Email (RULE) ---
+    df["Email"]       = df["Email"].apply(clean_email)
+    df["email_valid"] = df["Email"].apply(validate_email)
+
+    # --- Dates (RULE) ---
+    df["Birth_Date"] = df["Birth_Date"].apply(parse_date)
+    df["Hire_Date"]  = df["Hire_Date"].apply(parse_date)
+
+    # --- Gender (RULE): M/F -> Male/Female, blank -> Not Specified ---
+    gender_map = {"M": "Male", "F": "Female", "m": "Male", "f": "Female",
+                  "Male": "Male", "Female": "Female"}
+    df["Gender"] = df["Gender"].map(gender_map).fillna("Not Specified")
+
+    # --- Location suffix strip (RULE) ---
+    # fillna("") prevents silent null crashes on larger datasets.
+    # LLM maps the clean city name -> code in Stage 4, not here.
+    df["Location_Name"] = (
+        df["Location_Name"]
+        .fillna("")
+        .apply(strip_location_suffix)
     )
 
-df["exception_reason"] = exception_conditions
+    # --- Department (RULE) ---
+    df["Department_Name"] = df["Department_Name"].fillna("Unknown").str.strip()
 
-# =========================
-# SPLIT CLEAN VS EXCEPTIONS
-# =========================
+    # --- Salary (RULE) ---
+    df["Annual_Salary"] = df["Annual_Salary"].apply(clean_salary)
 
-exceptions_df = df[
-    df["exception_reason"] != ""
-].copy()
+    # --- Pay_Type (RULE): blank -> "Salary" ---
+    df["Pay_Type"] = df["Pay_Type"].fillna("Salary")
 
-clean_df = df[
-    df["exception_reason"] == ""
-].copy()
+    # --- Deduplication (RULE) ---
+    # Keep all copies in dupes_df for audit; remove all but first from main df.
+    before_dedup = len(df)
+    dupes_df = df[
+        df.duplicated(subset=["First_Name", "Last_Name", "Birth_Date"], keep=False)
+    ].copy()
+    df = df.drop_duplicates(subset=["First_Name", "Last_Name", "Birth_Date"])
+    dupes_removed = before_dedup - len(df)
 
-# =========================
-# ADD AUDIT COLUMNS
-# =========================
+    # --- Validation flags ---
+    df["salary_valid"]     = df["Annual_Salary"].notnull()
+    df["birth_date_valid"] = df["Birth_Date"].notnull()
+    df["hire_date_valid"]  = df["Hire_Date"].notnull()
 
-timestamp = datetime.now()
+    # --- Exception split ---
+    df["exception_reason"] = df.apply(build_exception_reason, axis=1)
+    exceptions_df = df[df["exception_reason"] != ""].copy()
+    clean_df      = df[df["exception_reason"] == ""].copy()
 
-clean_df["source_system"] = "UKG"
+    # --- Audit columns (field-mapping doc audit fields table) ---
+    timestamp = datetime.now().isoformat()
+    for frame in [clean_df, exceptions_df]:
+        frame["source_system"]    = "UKG"
+        frame["source_record_id"] = frame["Employee_ID"]
+        frame["load_timestamp"]   = timestamp
+        frame["pipeline_version"] = "v1.1"
 
-clean_df["load_timestamp"] = timestamp
+    stats = {
+        "raw_count":       raw_count,
+        "dupes_removed":   dupes_removed,
+        "clean_count":     len(clean_df),
+        "exception_count": len(exceptions_df),
+    }
 
-clean_df["pipeline_version"] = "v1.0"
-
-exceptions_df["source_system"] = "UKG"
-
-exceptions_df["load_timestamp"] = timestamp
-
-exceptions_df["pipeline_version"] = "v1.0"
-
-clean_df["source_record_id"] = clean_df["Employee_ID"]
-
-exceptions_df["source_record_id"] = exceptions_df["Employee_ID"]
-
-# =========================
-# SAVE TO SQLITE
-# =========================
-
-from sqlalchemy import create_engine
-
-engine = create_engine(
-    "sqlite:///employees.db"
-)
-
-clean_df.to_sql(
-    "workday_employees",
-    engine,
-    if_exists="replace",
-    index=False
-)
-
-exceptions_df.to_sql(
-    "exceptions",
-    engine,
-    if_exists="replace",
-    index=False
-)
-
-# =========================
-# SUMMARY
-# =========================
-
-print("\n===== PIPELINE SUMMARY =====")
-
-print(f"Original rows: {len(raw_df)}")
-
-print(f"Duplicates removed: {duplicates_removed}")
-
-print(f"Clean rows: {len(clean_df)}")
-
-print(f"Exception rows: {len(exceptions_df)}")
-
-print("\nDone.")
+    return clean_df, exceptions_df, dupes_df, stats

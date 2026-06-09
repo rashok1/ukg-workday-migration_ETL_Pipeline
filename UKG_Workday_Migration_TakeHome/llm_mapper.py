@@ -1,57 +1,48 @@
 """
 llm_mapper.py
 -------------
-Stage 4 of the pipeline: LLM-based fuzzy mapping.
+Stage 4: LLM-based fuzzy mapping + persistent in-process cache.
 
-Per the field-mapping doc, LLM is ONLY used for these three fields:
-  - Job_Title      -> Workday job catalog CODE  (e.g. "RN", "PHYS_FAM")
-  - Department_Name -> Workday supervisory org label
-  - Location_Name   -> Workday location CODE    (e.g. "SRCY")
+  1. needs_human_review is defined HERE, in apply_llm_mappings().
+     It is NEVER referenced in cleaning_real.py (which has no LLM columns).
+     etl_pipeline.py reads it from clean_df AFTER this function returns.
 
-All other fields (dates, salary, gender, email, pay type) are RULE-owned
-and stay in cleaning_real.py. This module never touches them.
+  2. Persistent mapping cache via SQLite (mapping_cache table).
+     Resolution order per call:
+       a. Hardcoded shorthand dict  -> confidence 1.0, no I/O
+       b. Catalog key dict          -> confidence 1.0, no I/O
+       c. mapping_cache table       -> confidence from prior run, no Ollama
+       d. Ollama LLM call           -> result written to cache for next run
+     @lru_cache is kept as an in-process safety net on top.
 
-Caching strategy (per your question):
-  1. Check hardcoded lookup dict first -- known values return instantly
-     at confidence 1.0, no LLM call at all.
-  2. On a miss, call LLM once and cache the result with @lru_cache.
-     So "Registered Nurse" hits the model once; the 29 other rows
-     with the same value get the cached result.
+  3. Unique-value mapping in apply_llm_mappings() -- N unique values,
+     not N rows. pandas .map() joins results back to full dataframe.
 
-JSON safety:
-  llama3 wraps output in ```json ... ``` fences even when told not to.
-  We strip those before json.loads() -- without this every call silently
-  fails and returns confidence 0.0.
+  4. Timestamp standardised to datetime.now().isoformat() everywhere.
 
-No PHI in prompts (process flow doc Stage 4):
-  Only the fuzzy field value is sent. Name, DOB, salary stay in SQLite.
-
-Audit trail (field-mapping doc):
-  Every mapping returns {"workday_value", "confidence", "reason"}.
-  confidence < 0.8 -> needs_human_review = True -> Streamlit review queue.
-  The reason field populates ai_transformation_reason in the DB.
 """
 
 import re
 import json
 import ollama
+import sqlite3
 from functools import lru_cache
+from datetime import datetime
 
 
 # =========================================================
 # CONFIG
 # =========================================================
 
-MODEL_NAME = "llama3:latest"
-CONFIDENCE_THRESHOLD = 0.8  # below this -> routed to human review
+MODEL_NAME           = "llama3:latest"
+CONFIDENCE_THRESHOLD = 0.8
+CACHE_DB_PATH        = "employees.db"   # same DB as main pipeline
 
 
 # =========================================================
 # CATALOGS  (source: UKG_to_Workday_Field_Mapping.md)
 # =========================================================
 
-# The authoritative job catalog from the spec.
-# Keys are Workday codes; values are human-readable descriptions.
 JOB_CATALOG = {
     "PHYS_FAM":    "Family Physician (MD/DO)",
     "PHYS_INTERN": "Internal Medicine Physician",
@@ -75,8 +66,6 @@ JOB_CATALOG = {
     "OPS_MGR":     "Operations Manager",
 }
 
-# Hardcoded shorthand -> code. These are unambiguous; no LLM needed.
-# Extend this as you discover repeated patterns in the raw data.
 JOB_SHORTHAND = {
     "RN":                       "RN",
     "REGISTERED NURSE":         "RN",
@@ -107,7 +96,6 @@ JOB_SHORTHAND = {
     "PATIENT COORDINATOR":      "ADMIN_FD",
 }
 
-# Location codes from the spec.
 LOCATION_CODES = {
     "AUG":  "Augusta",
     "BAT":  "Batesville",
@@ -122,38 +110,88 @@ LOCATION_CODES = {
     "REM":  "Remote / Telehealth",
 }
 
-# Reverse lookup: cleaned city name -> code.
-# cleaning_real.py already strips "HQ"/"Office", so inputs here are
-# already clean city names. These exact matches need no LLM.
 LOCATION_SHORTHAND = {v.upper(): k for k, v in LOCATION_CODES.items()}
-LOCATION_SHORTHAND["REMOTE"] = "REM"
+LOCATION_SHORTHAND["REMOTE"]     = "REM"
 LOCATION_SHORTHAND["TELEHEALTH"] = "REM"
 
-# Department: known variants -> canonical label.
-# Field-mapping doc says "mostly LLM but with a strong prior from the
-# rules table" -- this is that rules table.
 DEPT_SHORTHAND = {
-    "HR":                   "Human Resources",
-    "HUMAN RESOURCES":      "Human Resources",
-    "PEOPLE":               "Human Resources",
-    "IT":                   "IT",
+    "HR":                     "Human Resources",
+    "HUMAN RESOURCES":        "Human Resources",
+    "PEOPLE":                 "Human Resources",
+    "IT":                     "IT",
     "INFORMATION TECHNOLOGY": "IT",
-    "FINANCE":              "Finance",
-    "BILLING":              "Billing",
-    "ADMIN":                "Administration",
-    "ADMINISTRATION":       "Administration",
-    "OPERATIONS":           "Operations",
-    "OPS":                  "Operations",
-    "PHARMACY":             "Pharmacy",
-    "PRIMARY CARE":         "Primary Care",
-    "NURSING":              "Primary Care",
-    "DENTAL":               "Dental",
-    "BEHAVIORAL HEALTH":    "Behavioral Health",
-    "BH":                   "Behavioral Health",
-    "UNKNOWN":              "Unknown",
+    "FINANCE":                "Finance",
+    "BILLING":                "Billing",
+    "ADMIN":                  "Administration",
+    "ADMINISTRATION":         "Administration",
+    "OPERATIONS":             "Operations",
+    "OPS":                    "Operations",
+    "PHARMACY":               "Pharmacy",
+    "PRIMARY CARE":           "Primary Care",
+    "NURSING":                "Primary Care",
+    "DENTAL":                 "Dental",
+    "BEHAVIORAL HEALTH":      "Behavioral Health",
+    "BH":                     "Behavioral Health",
+    "UNKNOWN":                "Unknown",
 }
 
 ALLOWED_DEPARTMENTS = sorted(set(DEPT_SHORTHAND.values()))
+
+
+# =========================================================
+# PERSISTENT CACHE  (SQLite mapping_cache table)
+# Survives between pipeline runs. Ollama is only called
+# when a value has never been seen before.
+# =========================================================
+
+def _ensure_cache_table():
+    """Create mapping_cache table if it doesn't exist."""
+    with sqlite3.connect(CACHE_DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS mapping_cache (
+                field_type    TEXT NOT NULL,
+                raw_value     TEXT NOT NULL,
+                workday_value TEXT,
+                confidence    REAL,
+                reason        TEXT,
+                cached_at     TEXT,
+                PRIMARY KEY (field_type, raw_value)
+            )
+        """)
+
+
+def _cache_get(field_type: str, raw_value: str) -> dict | None:
+    """Return cached result or None if not found."""
+    try:
+        with sqlite3.connect(CACHE_DB_PATH) as conn:
+            row = conn.execute(
+                "SELECT workday_value, confidence, reason FROM mapping_cache "
+                "WHERE field_type = ? AND raw_value = ?",
+                (field_type, raw_value)
+            ).fetchone()
+        if row:
+            return {"workday_value": row[0], "confidence": row[1], "reason": row[2]}
+        return None
+    except Exception:
+        return None
+
+
+def _cache_set(field_type: str, raw_value: str, result: dict):
+    """Write a result to the persistent cache."""
+    try:
+        with sqlite3.connect(CACHE_DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO mapping_cache "
+                "(field_type, raw_value, workday_value, confidence, reason, cached_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (field_type, raw_value,
+                 result.get("workday_value"),
+                 result.get("confidence", 0.0),
+                 result.get("reason", ""),
+                 datetime.now().isoformat())
+            )
+    except Exception:
+        pass  # cache write failure is non-fatal
 
 
 # =========================================================
@@ -162,10 +200,10 @@ ALLOWED_DEPARTMENTS = sorted(set(DEPT_SHORTHAND.values()))
 
 def _call_ollama(prompt: str) -> dict:
     """
-    Sends prompt to local Ollama. Strips markdown fences before
-    parsing -- llama3 adds them even when told not to, which would
-    cause json.loads to throw and silently return confidence 0.0
-    on every single call.
+    Single HTTP round-trip to local Ollama.
+    Strips markdown fences -- llama3 adds ```json ... ``` even when told
+    not to, causing json.loads() to throw and returning confidence 0.0
+    silently on every call without this fix.
     """
     try:
         response = ollama.chat(
@@ -173,58 +211,44 @@ def _call_ollama(prompt: str) -> dict:
             messages=[{"role": "user", "content": prompt}],
         )
         raw = response["message"]["content"].strip()
-        # Strip ```json ... ``` or ``` ... ``` fences
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
         return json.loads(raw)
     except json.JSONDecodeError:
-        return {
-            "workday_value": None,
-            "confidence": 0.0,
-            "reason": "model returned non-JSON output",
-        }
+        return {"workday_value": None, "confidence": 0.0,
+                "reason": "model returned non-JSON output"}
     except Exception as e:
-        return {
-            "workday_value": None,
-            "confidence": 0.0,
-            "reason": f"LLM error: {e}",
-        }
+        return {"workday_value": None, "confidence": 0.0,
+                "reason": f"LLM error: {e}"}
 
 
 # =========================================================
-# JOB TITLE MAPPER
+# INDIVIDUAL MAPPERS
+# Resolution order:
+#   1. hardcoded shorthand (no I/O)
+#   2. catalog key (no I/O)
+#   3. persistent cache read (SQLite)
+#   4. Ollama call + cache write
+#   @lru_cache is kept as in-process safety net
 # =========================================================
 
 @lru_cache(maxsize=256)
 def normalize_job_title(job_title: str) -> dict:
-    """
-    Maps free-text Job_Title -> Workday catalog CODE.
-
-    Order of resolution:
-      1. Hardcoded JOB_SHORTHAND -> confidence 1.0, no LLM call.
-      2. Input already is a valid catalog code -> confidence 1.0.
-      3. LLM with few-shot prompt (spec sample prompt) -> cached.
-    """
     key = job_title.strip().upper()
 
     if key in JOB_SHORTHAND:
-        return {
-            "workday_value": JOB_SHORTHAND[key],
-            "confidence": 1.0,
-            "reason": "exact shorthand match -- no LLM needed",
-        }
-
+        return {"workday_value": JOB_SHORTHAND[key],
+                "confidence": 1.0, "reason": "exact shorthand match"}
     if key in JOB_CATALOG:
-        return {
-            "workday_value": key,
-            "confidence": 1.0,
-            "reason": "input is already a valid catalog code",
-        }
+        return {"workday_value": key,
+                "confidence": 1.0, "reason": "already a valid catalog code"}
 
-    # LLM path -- prompt pattern taken directly from the spec
-    catalog_lines = "\n".join(
-        f"{code} -- {desc}" for code, desc in JOB_CATALOG.items()
-    )
+    cached = _cache_get("job_title", job_title)
+    if cached:
+        cached["reason"] = "[cache] " + cached.get("reason", "")
+        return cached
+
+    catalog_lines = "\n".join(f"{c} -- {d}" for c, d in JOB_CATALOG.items())
     prompt = f"""You map messy HRIS job titles to Acme Health's Workday job catalog.
 Reply with ONLY valid JSON: {{"workday_value": "...", "confidence": 0.0, "reason": "..."}}
 
@@ -234,34 +258,27 @@ Catalog (code -- description):
 Examples:
 "RN"               -> {{"workday_value":"RN","confidence":0.99,"reason":"abbrev"}}
 "Registered Nurse" -> {{"workday_value":"RN","confidence":0.99,"reason":"exact"}}
-"Nurse Practitioner" -> {{"workday_value":"NP_FAM","confidence":0.92,"reason":"family is default specialty for Acme Health NPs"}}
+"Nurse Practitioner" -> {{"workday_value":"NP_FAM","confidence":0.92,"reason":"family default for Acme Health NPs"}}
 
 Input: "{job_title}"
 """
-    return _call_ollama(prompt)
+    result = _call_ollama(prompt)
+    _cache_set("job_title", job_title, result)
+    return result
 
-
-# =========================================================
-# DEPARTMENT MAPPER
-# =========================================================
 
 @lru_cache(maxsize=128)
 def normalize_department(dept_name: str) -> dict:
-    """
-    Maps Department_Name -> Workday supervisory org label.
-
-    Order of resolution:
-      1. Hardcoded DEPT_SHORTHAND -> confidence 1.0, no LLM.
-      2. LLM with constrained output list -> cached.
-    """
     key = dept_name.strip().upper()
 
     if key in DEPT_SHORTHAND:
-        return {
-            "workday_value": DEPT_SHORTHAND[key],
-            "confidence": 1.0,
-            "reason": "exact shorthand match -- no LLM needed",
-        }
+        return {"workday_value": DEPT_SHORTHAND[key],
+                "confidence": 1.0, "reason": "exact shorthand match"}
+
+    cached = _cache_get("department", dept_name)
+    if cached:
+        cached["reason"] = "[cache] " + cached.get("reason", "")
+        return cached
 
     allowed_str = ", ".join(f'"{d}"' for d in ALLOWED_DEPARTMENTS)
     prompt = f"""You normalize HRIS department names for Acme Health's Workday migration.
@@ -272,45 +289,28 @@ Use "Unknown" only if nothing fits.
 
 Input: "{dept_name}"
 """
-    return _call_ollama(prompt)
+    result = _call_ollama(prompt)
+    _cache_set("department", dept_name, result)
+    return result
 
-
-# =========================================================
-# LOCATION MAPPER
-# =========================================================
 
 @lru_cache(maxsize=64)
 def normalize_location(location_name: str) -> dict:
-    """
-    Maps Location_Name -> Workday location CODE (e.g. "SRCY").
-
-    Note: cleaning_real.py strips "HQ"/"Office" before this runs,
-    so input here is already a plain city name.
-
-    Order of resolution:
-      1. Hardcoded LOCATION_SHORTHAND -> confidence 1.0, no LLM.
-      2. Input already is a valid code -> confidence 1.0.
-      3. LLM -> cached.
-    """
     key = location_name.strip().upper()
 
     if key in LOCATION_SHORTHAND:
-        return {
-            "workday_value": LOCATION_SHORTHAND[key],
-            "confidence": 1.0,
-            "reason": "exact shorthand match -- no LLM needed",
-        }
-
+        return {"workday_value": LOCATION_SHORTHAND[key],
+                "confidence": 1.0, "reason": "exact shorthand match"}
     if key in LOCATION_CODES:
-        return {
-            "workday_value": key,
-            "confidence": 1.0,
-            "reason": "input is already a valid location code",
-        }
+        return {"workday_value": key,
+                "confidence": 1.0, "reason": "already a valid location code"}
 
-    loc_lines = "\n".join(
-        f"{code} -- {city}" for code, city in LOCATION_CODES.items()
-    )
+    cached = _cache_get("location", location_name)
+    if cached:
+        cached["reason"] = "[cache] " + cached.get("reason", "")
+        return cached
+
+    loc_lines = "\n".join(f"{c} -- {city}" for c, city in LOCATION_CODES.items())
     prompt = f"""You map clinic location names to Workday location codes for Acme Health.
 Reply with ONLY valid JSON: {{"workday_value": "...", "confidence": 0.0, "reason": "..."}}
 
@@ -318,71 +318,94 @@ Location codes (code -- city):
 {loc_lines}
 
 Examples:
-"Searcy"     -> {{"workday_value":"SRCY","confidence":0.99,"reason":"exact city match"}}
-"Searcy AR"  -> {{"workday_value":"SRCY","confidence":0.97,"reason":"state suffix stripped"}}
-"Remote"     -> {{"workday_value":"REM","confidence":0.99,"reason":"telehealth/remote"}}
+"Searcy AR"  -> {{"workday_value":"SRCY","confidence":0.97,"reason":"state suffix"}}
+"Remote"     -> {{"workday_value":"REM","confidence":0.99,"reason":"telehealth"}}
 
 Input: "{location_name}"
 """
-    return _call_ollama(prompt)
+    result = _call_ollama(prompt)
+    _cache_set("location", location_name, result)
+    return result
 
 
 # =========================================================
-# DATAFRAME MAPPER
+# DATAFRAME MAPPER  --  UNIQUE VALUE MAPPING
+# needs_human_review is DEFINED HERE, not in cleaning_real.py.
 # =========================================================
 
 def apply_llm_mappings(df):
     """
-    Applies all three mappers to the dataframe.
+    Maps Job_Title, Department_Name, Location_Name using unique-value mapping.
 
-    Adds these columns (matching field-mapping doc audit fields):
+    Unique value mapping:
+      - Extract unique values per column (e.g. 8 unique titles from 62 rows)
+      - Call mapper once per unique value
+      - Join results back with pandas .map() (vectorised, no row loop)
+
+    Persistent cache:
+      - Before calling Ollama, checks mapping_cache table in employees.db
+      - After calling Ollama, writes result to mapping_cache
+      - On next pipeline run, previously seen values never hit Ollama
+
+    needs_human_review:
+      - Defined here, after LLM mapping produces confidence scores
+      - Never exists on a DataFrame that hasn't been through this function
+      - etl_pipeline.py reads it only after this function returns
+
+    Adds columns:
       workday_job_code, job_title_confidence, job_title_reason
       workday_department, department_confidence, department_reason
       workday_location_code, location_confidence, location_reason
-      llm_confidence       -- lowest of the three (single audit field per spec)
-      needs_human_review   -- True if any confidence < 0.8
-      ai_transformation_reason -- composite reason string for auditors
-      review_status        -- "auto" or "review" per field-mapping doc
+      llm_confidence           -- min of three (field-mapping doc audit field)
+      needs_human_review       -- True if any confidence < 0.8
+      ai_transformation_reason -- composite reason string
+      review_status            -- "auto" or "review"
     """
-    def unpack(series, key):
-        return series.apply(
-            lambda x: x.get(key) if isinstance(x, dict) else None
+    _ensure_cache_table()
+
+    def map_unique(column: str, mapper_fn):
+        unique_vals = df[column].dropna().unique()
+        results     = {val: mapper_fn(str(val)) for val in unique_vals}
+        return (
+            {v: r.get("workday_value") for v, r in results.items()},
+            {v: r.get("confidence", 0.0) for v, r in results.items()},
+            {v: r.get("reason", "")     for v, r in results.items()},
         )
 
-    job_results  = df["Job_Title"].apply(normalize_job_title)
-    dept_results = df["Department_Name"].apply(normalize_department)
-    loc_results  = df["Location_Name"].apply(normalize_location)
+    # --- Job title ---
+    jv, jc, jr = map_unique("Job_Title", normalize_job_title)
+    df["workday_job_code"]     = df["Job_Title"].map(jv)
+    df["job_title_confidence"] = df["Job_Title"].map(jc)
+    df["job_title_reason"]     = df["Job_Title"].map(jr)
 
-    df["workday_job_code"]      = unpack(job_results,  "workday_value")
-    df["job_title_confidence"]  = unpack(job_results,  "confidence")
-    df["job_title_reason"]      = unpack(job_results,  "reason")
+    # --- Department ---
+    dv, dc, dr = map_unique("Department_Name", normalize_department)
+    df["workday_department"]    = df["Department_Name"].map(dv)
+    df["department_confidence"] = df["Department_Name"].map(dc)
+    df["department_reason"]     = df["Department_Name"].map(dr)
 
-    df["workday_department"]    = unpack(dept_results, "workday_value")
-    df["department_confidence"] = unpack(dept_results, "confidence")
-    df["department_reason"]     = unpack(dept_results, "reason")
+    # --- Location ---
+    lv, lc, lr = map_unique("Location_Name", normalize_location)
+    df["workday_location_code"] = df["Location_Name"].map(lv)
+    df["location_confidence"]   = df["Location_Name"].map(lc)
+    df["location_reason"]       = df["Location_Name"].map(lr)
 
-    df["workday_location_code"] = unpack(loc_results,  "workday_value")
-    df["location_confidence"]   = unpack(loc_results,  "confidence")
-    df["location_reason"]       = unpack(loc_results,  "reason")
-
-    # llm_confidence: single summary field per the field-mapping doc audit table
+    # --- Derived audit fields ---
     df["llm_confidence"] = df[[
-        "job_title_confidence",
-        "department_confidence",
-        "location_confidence",
+        "job_title_confidence", "department_confidence", "location_confidence"
     ]].min(axis=1)
 
-    # needs_human_review: any field below threshold
-    df["needs_human_review"] = df["llm_confidence"].fillna(0) < CONFIDENCE_THRESHOLD
+    # needs_human_review: defined here, only here
+    df["needs_human_review"] = (
+        df["llm_confidence"].fillna(0) < CONFIDENCE_THRESHOLD
+    )
 
-    # ai_transformation_reason: composite string for auditors
     df["ai_transformation_reason"] = (
-        "Job: "  + df["job_title_reason"].fillna("n/a")   + " | " +
-        "Dept: " + df["department_reason"].fillna("n/a")  + " | " +
+        "Job: "  + df["job_title_reason"].fillna("n/a")  + " | " +
+        "Dept: " + df["department_reason"].fillna("n/a") + " | " +
         "Loc: "  + df["location_reason"].fillna("n/a")
     )
 
-    # review_status per field-mapping doc: "auto" or "review"
     df["review_status"] = df["needs_human_review"].map(
         {True: "review", False: "auto"}
     )
@@ -395,6 +418,7 @@ def apply_llm_mappings(df):
 # =========================================================
 
 if __name__ == "__main__":
+    _ensure_cache_table()
     cases = [
         ("JOB",  normalize_job_title,  [
             "RN", "Registered Nurse", "Nurse RN",
@@ -404,7 +428,7 @@ if __name__ == "__main__":
             "HR", "Human Resources", "People Ops", "Nursing",
         ]),
         ("LOC",  normalize_location,   [
-            "Searcy", "Searcy AR", "Newport Office", "Remote",
+            "Searcy", "Searcy AR", "Newport", "Remote",
         ]),
     ]
     for label, fn, inputs in cases:
